@@ -54,3 +54,6 @@ bin*
 .idea/
 *.code-workspace
 *.vscode
+
+## Project
+src/config.hpp
