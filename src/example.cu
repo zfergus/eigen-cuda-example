@@ -4,30 +4,16 @@
 
 namespace ece {
 
+// Eigen-based
+
 __host__ __device__ float
 point_point_distance(const Eigen::Vector3f& p1, const Eigen::Vector3f& p2)
 {
     return (p1 - p2).norm();
 }
 
-__host__ __device__ float point_point_distance(const Vec3D& p1, const Vec3D& p2)
-{
-    return sqrt(
-        (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y)
-        + (p1.z - p2.z) * (p1.z - p2.z));
-}
-
 __global__ void compute_distances_cuda(
     Eigen::Vector3f* v1, Eigen::Vector3f* v2, float* out, size_t N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        out[idx] = point_point_distance(v1[idx], v2[idx]);
-    }
-}
-
-__global__ void
-compute_distances_cuda(Vec3D* v1, Vec3D* v2, float* out, size_t N)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < N) {
@@ -65,6 +51,30 @@ compute_distances_gpu(const Eigen::MatrixXf& v1, const Eigen::MatrixXf& v2)
     return out;
 }
 
+// Baseline CUDA implementation
+
+struct Vec3D {
+    float x;
+    float y;
+    float z;
+};
+
+__host__ __device__ float point_point_distance(const Vec3D& p1, const Vec3D& p2)
+{
+    return sqrt(
+        (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y)
+        + (p1.z - p2.z) * (p1.z - p2.z));
+}
+
+__global__ void
+compute_distances_cuda(Vec3D* v1, Vec3D* v2, float* out, size_t N)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < N) {
+        out[idx] = point_point_distance(v1[idx], v2[idx]);
+    }
+}
+
 Eigen::VectorXf compute_distances_gpu_no_eigen(
     const Eigen::MatrixXf& v1, const Eigen::MatrixXf& v2)
 {
@@ -92,6 +102,8 @@ Eigen::VectorXf compute_distances_gpu_no_eigen(
 
     return out;
 }
+
+// Baseline CPU implementation
 
 Eigen::VectorXf
 compute_distances_cpu(const Eigen::MatrixXf& v1, const Eigen::MatrixXf& v2)

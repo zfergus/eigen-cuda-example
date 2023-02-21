@@ -5,12 +5,6 @@
 
 namespace ece {
 
-struct Vec3D {
-    float x;
-    float y;
-    float z;
-};
-
 Eigen::VectorXf
 compute_distances_gpu(const Eigen::MatrixXf& v1, const Eigen::MatrixXf& v2);
 
