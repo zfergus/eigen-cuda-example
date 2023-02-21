@@ -3,6 +3,8 @@
 
 #include <example.h>
 
+#include <iostream>
+
 TEST_CASE("Test Eigen CUDA", "")
 {
     for (int i = 0; i < 100; ++i) {
@@ -13,6 +15,11 @@ TEST_CASE("Test Eigen CUDA", "")
         const Eigen::VectorXf r_gpu = ece::compute_distances_gpu(m1, m2);
         const Eigen::VectorXf r_gpu_no_eigen =
             ece::compute_distances_gpu_no_eigen(m1, m2);
+
+        // std::cout << "r_cpu         : " << r_cpu.transpose() << std::endl;
+        // std::cout << "r_gpu         : " << r_gpu.transpose() << std::endl;
+        // std::cout << "r_gpu_no_eigen: " << r_gpu_no_eigen.transpose()
+        //           << std::endl;
 
         CHECK(r_cpu.isApprox(r_gpu));
         CHECK(r_cpu.isApprox(r_gpu_no_eigen));

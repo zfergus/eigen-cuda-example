@@ -12,8 +12,9 @@ point_point_distance(const Eigen::Vector3f& p1, const Eigen::Vector3f& p2)
 
 __host__ __device__ float point_point_distance(const Vec3D& p1, const Vec3D& p2)
 {
-    return (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y)
-        + (p1.z - p2.z) * (p1.z - p2.z);
+    return sqrt(
+        (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y)
+        + (p1.z - p2.z) * (p1.z - p2.z));
 }
 
 __global__ void compute_distances_cuda(
@@ -54,7 +55,7 @@ compute_distances_gpu(const Eigen::MatrixXf& v1, const Eigen::MatrixXf& v2)
 
     compute_distances_cuda<<<(N + 255) / 256, 256>>>(d_v1, d_v2, d_out, N);
 
-    Eigen::VectorXf out;
+    Eigen::VectorXf out(N);
     cudaMemcpy(out.data(), d_out, N * sizeof(float), cudaMemcpyDeviceToHost);
 
     cudaFree(d_v1);
@@ -82,7 +83,7 @@ Eigen::VectorXf compute_distances_gpu_no_eigen(
 
     compute_distances_cuda<<<(N + 255) / 256, 256>>>(d_v1, d_v2, d_out, N);
 
-    Eigen::VectorXf out;
+    Eigen::VectorXf out(N);
     cudaMemcpy(out.data(), d_out, N * sizeof(float), cudaMemcpyDeviceToHost);
 
     cudaFree(d_v1);
