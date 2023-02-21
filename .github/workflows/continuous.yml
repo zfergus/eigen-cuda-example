@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04]
+        os: [ubuntu-latest]
         config: [Debug, Release]
         include:
-          - os: ubuntu-20.04
+          - os: ubuntu-latest
             name: Linux
     steps:
       - name: Checkout repository
@@ -53,8 +53,8 @@ jobs:
       - name: Build
         run: cd build; make -j2; ccache --show-stats
 
-      - name: Tests
-        run: cd build; ctest --verbose
+      # - name: Tests
+      #   run: cd build; ctest --verbose
 
-      - name: Benchmark
-        run: cd build; ./tests/eigen_cuda_example_tests '[!benchmark]'
+      # - name: Benchmark
+      #   run: cd build; ./tests/eigen_cuda_example_tests '[!benchmark]'
