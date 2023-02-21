@@ -1,14 +1,20 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/benchmark/catch_benchmark.hpp>
 
-#include <cstdint>
+#include <example.h>
 
-uint32_t factorial( uint32_t number ) {
-    return number <= 1 ? number : factorial(number-1) * number;
-}
+TEST_CASE("Test Eigen CUDA", "")
+{
+    for (int i = 0; i < 100; ++i) {
+        Eigen::MatrixXf m1 = Eigen::MatrixXf::Random(3, 100000);
+        Eigen::MatrixXf m2 = Eigen::MatrixXf::Random(3, 100000);
 
-TEST_CASE( "Factorials are computed", "[factorial]" ) {
-    REQUIRE( factorial( 1) == 1 );
-    REQUIRE( factorial( 2) == 2 );
-    REQUIRE( factorial( 3) == 6 );
-    REQUIRE( factorial(10) == 3'628'800 );
+        const Eigen::VectorXf r_cpu = ece::compute_distances_cpu(m1, m2);
+        const Eigen::VectorXf r_gpu = ece::compute_distances_gpu(m1, m2);
+        const Eigen::VectorXf r_gpu_no_eigen =
+            ece::compute_distances_gpu_no_eigen(m1, m2);
+
+        CHECK(r_cpu.isApprox(r_gpu));
+        CHECK(r_cpu.isApprox(r_gpu_no_eigen));
+    }
 }

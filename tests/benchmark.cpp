@@ -5,10 +5,13 @@
 
 TEST_CASE("Benchmark Eigen CUDA", "[!benchmark]")
 {
-    Eigen::MatrixXf m1 = Eigen::MatrixXf::Random(3, 10000000);
-    Eigen::MatrixXf m2 = Eigen::MatrixXf::Random(3, 10000000);
+    Eigen::MatrixXf m1 = Eigen::MatrixXf::Random(3, 1000000);
+    Eigen::MatrixXf m2 = Eigen::MatrixXf::Random(3, 1000000);
 
-    BENCHMARK("CPU") { return compute_distances_cpu(m1, m2); };
-
-    BENCHMARK("GPU") { return compute_distances_gpu(m1, m2); };
+    BENCHMARK("CPU") { return ece::compute_distances_cpu(m1, m2); };
+    BENCHMARK("GPU") { return ece::compute_distances_gpu(m1, m2); };
+    BENCHMARK("GPU_NO_EIGEN")
+    {
+        return ece::compute_distances_gpu_no_eigen(m1, m2);
+    };
 }
