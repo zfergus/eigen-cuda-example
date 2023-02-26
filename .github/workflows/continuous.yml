@@ -45,6 +45,7 @@ jobs:
         run: |
           mkdir -p build
           cd build
+          cmake --version
           cmake .. \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DEIGEN_CUDA_EXAMPLE_BUILD_TESTS=ON \

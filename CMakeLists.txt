@@ -7,7 +7,7 @@ else()
 endif()
 
 # Check required CMake version
-set(REQUIRED_CMAKE_VERSION "3.24.0")
+set(REQUIRED_CMAKE_VERSION "3.14.0")
 if(EIGEN_CUDA_EXAMPLE_TOPLEVEL_PROJECT)
     cmake_minimum_required(VERSION ${REQUIRED_CMAKE_VERSION})
 else()
@@ -115,16 +115,18 @@ endif()
 # and executables.
 set_target_properties(eigen_cuda_example PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-# include(FindCUDA/select_compute_arch)
-# CUDA_DETECT_INSTALLED_GPUS(CUDA_ARCH_LIST)
-# string(STRIP "${CUDA_ARCH_LIST}" CUDA_ARCH_LIST)
-# string(REPLACE " " ";" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
-# string(REPLACE "." "" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
-# set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
-# set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "${CUDA_ARCH_LIST}")
-
-set(CMAKE_CUDA_ARCHITECTURES "native")
-set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "native")
+if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.24.0")
+  set(CMAKE_CUDA_ARCHITECTURES "native")
+  set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "native")
+else()
+  include(FindCUDA/select_compute_arch)
+  CUDA_DETECT_INSTALLED_GPUS(CUDA_ARCH_LIST)
+  string(STRIP "${CUDA_ARCH_LIST}" CUDA_ARCH_LIST)
+  string(REPLACE " " ";" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
+  string(REPLACE "." "" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
+  set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+  set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "${CUDA_ARCH_LIST}")
+endif()
 
 if(APPLE)
   # We need to add the path to the driver (libcuda.dylib) as an rpath,
