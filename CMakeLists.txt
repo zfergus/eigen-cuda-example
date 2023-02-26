@@ -7,7 +7,7 @@ else()
 endif()
 
 # Check required CMake version
-set(REQUIRED_CMAKE_VERSION "3.14.0")
+set(REQUIRED_CMAKE_VERSION "3.24.0")
 if(EIGEN_CUDA_EXAMPLE_TOPLEVEL_PROJECT)
     cmake_minimum_required(VERSION ${REQUIRED_CMAKE_VERSION})
 else()
@@ -63,6 +63,9 @@ configure_file(
 # Public include directory for IPC Toolkit
 target_include_directories(eigen_cuda_example PUBLIC "${EIGEN_CUDA_EXAMPLE_INCLUDE_DIR}")
 
+# CMake utils
+include(eigen_cuda_example_target_link_system_libraries)
+
 ################################################################################
 # Optional Definitions
 ################################################################################
@@ -76,7 +79,13 @@ target_compile_definitions(eigen_cuda_example PUBLIC NOMINMAX)
 
 # Eigen
 include(eigen)
-target_link_libraries(eigen_cuda_example PUBLIC Eigen3::Eigen)
+eigen_cuda_example_target_link_system_libraries(eigen_cuda_example PUBLIC Eigen3::Eigen)
+# https://eigen.tuxfamily.org/dox/TopicCUDA.html
+target_compile_definitions(eigen_cuda_example PUBLIC "EIGEN_DEFAULT_DENSE_INDEX_TYPE=int")
+
+# spdlog
+include(spdlog)
+eigen_cuda_example_target_link_system_libraries(eigen_cuda_example PUBLIC spdlog::spdlog)
 
 # Extra warnings (link last for highest priority)
 include(eigen_cuda_example_warnings)
@@ -106,14 +115,16 @@ endif()
 # and executables.
 set_target_properties(eigen_cuda_example PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
-# Nvidia RTX8000 -> compute_75
-# Nvidia V100 -> compute_70
-# Nvidia 1080/1080Ti -> compute_61
-# Nvidia 3080Ti -> compute_86
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  set(CMAKE_CUDA_ARCHITECTURES 70 75 86)
-endif()
-set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "70;75;86")
+# include(FindCUDA/select_compute_arch)
+# CUDA_DETECT_INSTALLED_GPUS(CUDA_ARCH_LIST)
+# string(STRIP "${CUDA_ARCH_LIST}" CUDA_ARCH_LIST)
+# string(REPLACE " " ";" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
+# string(REPLACE "." "" CUDA_ARCH_LIST "${CUDA_ARCH_LIST}")
+# set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCH_LIST})
+# set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "${CUDA_ARCH_LIST}")
+
+set(CMAKE_CUDA_ARCHITECTURES "native")
+set_target_properties(eigen_cuda_example PROPERTIES CUDA_ARCHITECTURES "native")
 
 if(APPLE)
   # We need to add the path to the driver (libcuda.dylib) as an rpath,

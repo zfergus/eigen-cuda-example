@@ -5,6 +5,7 @@
 add_executable(eigen_cuda_example_tests
   test.cpp
   benchmark.cpp
+  utils.cpp
 )
 
 target_include_directories(eigen_cuda_example_tests PUBLIC ".")

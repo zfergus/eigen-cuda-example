@@ -1,39 +1,33 @@
 #pragma once
 
-#define EIGEN_DEFAULT_DENSE_INDEX_TYPE int
 #include <Eigen/Core>
+
+#include <vector>
 
 namespace ece {
 
 // Point-point distances
 
+template <bool USE_EIGEN = true>
 Eigen::VectorXf compute_point_point_distances_gpu(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2);
-
-Eigen::VectorXf compute_point_point_distances_gpu_no_eigen(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2);
+    const Eigen::MatrixXf& V,
+    const std::vector<std::array<int, 2>>& point_pairs);
 
 Eigen::VectorXf compute_point_point_distances_cpu(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2);
+    const Eigen::MatrixXf& V,
+    const std::vector<std::array<int, 2>>& point_pairs);
 
 // Line-line distances
 
+template <bool USE_EIGEN = true>
 Eigen::VectorXf compute_line_line_distances_gpu(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1);
-
-Eigen::VectorXf compute_line_line_distances_gpu_no_eigen(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1);
+    const Eigen::MatrixXf& V,
+    const Eigen::MatrixXi& E,
+    const std::vector<std::array<int, 2>>& line_pairs);
 
 Eigen::VectorXf compute_line_line_distances_cpu(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1);
+    const Eigen::MatrixXf& V,
+    const Eigen::MatrixXi& E,
+    const std::vector<std::array<int, 2>>& line_pairs);
 
 } // namespace ece

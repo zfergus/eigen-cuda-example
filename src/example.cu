@@ -4,17 +4,123 @@
 
 #include <Eigen/Geometry>
 
+#include <spdlog/spdlog.h>
+
+#define cudaErrorCheck(ans)                                                    \
+    {                                                                          \
+        ece::throw_on_cuda_error((ans), __FILE__, __LINE__);                   \
+    }
+
 namespace ece {
 
-// Eigen-based
+void throw_on_cuda_error(
+    const cudaError_t code, const char* file, const int line)
+{
+    if (code != cudaSuccess) {
+        const std::string message =
+            fmt::format("{}({}): {}", file, line, cudaGetErrorString(code));
+        spdlog::error(message);
+        throw std::runtime_error(message);
+    }
+}
 
-__host__ __device__ float
+//==============================================================================
+// Point-point example
+//==============================================================================
+
+__host__ __device__ inline float
 point_point_distance(const Eigen::Vector3f& p1, const Eigen::Vector3f& p2)
 {
     return (p1 - p2).squaredNorm();
 }
 
-__host__ __device__ float line_line_distance(
+__host__ __device__ inline float point_point_distance(
+    const float p1_x,
+    const float p1_y,
+    const float p1_z,
+    const float p2_x,
+    const float p2_y,
+    const float p2_z)
+{
+    return (p1_x - p2_x) * (p1_x - p2_x) + (p1_y - p2_y) * (p1_y - p2_y)
+        + (p1_z - p2_z) * (p1_z - p2_z);
+}
+
+template <bool USE_EIGEN = true>
+__global__ void compute_point_point_distances_kernel(
+    const float* __restrict__ Vx,
+    const float* __restrict__ Vy,
+    const float* __restrict__ Vz,
+    const size_t __restrict__ n_points,
+    const int* __restrict__ pairs,
+    const size_t __restrict__ n_pairs,
+    float* const out)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n_pairs; i += stride) {
+        const int vi = pairs[2 * i];
+        const int vj = pairs[2 * i + 1];
+        if constexpr (USE_EIGEN) {
+            out[i] = point_point_distance(
+                Eigen::Vector3f(Vx[vi], Vy[vi], Vz[vi]),
+                Eigen::Vector3f(Vx[vj], Vy[vj], Vz[vj]));
+        } else {
+            out[i] = point_point_distance(
+                Vx[vi], Vy[vi], Vz[vi], Vx[vj], Vy[vj], Vz[vj]);
+        }
+    }
+}
+
+template <bool USE_EIGEN>
+Eigen::VectorXf compute_point_point_distances_gpu(
+    const Eigen::MatrixXf& V,
+    const std::vector<std::array<int, 2>>& point_pairs)
+{
+    assert(V.cols() == 3);
+    const size_t n_points = V.rows();
+    const size_t n_pairs = point_pairs.size();
+
+    float* d_V;
+    cudaErrorCheck(cudaMalloc(&d_V, V.size() * sizeof(float)));
+    cudaErrorCheck(cudaMemcpy(
+        d_V, V.data(), V.size() * sizeof(float), cudaMemcpyHostToDevice));
+    const float* const d_Vx = d_V;
+    const float* const d_Vy = d_Vx + n_points;
+    const float* const d_Vz = d_Vy + n_points;
+
+    int* d_pairs;
+    cudaErrorCheck(cudaMalloc(&d_pairs, 2 * n_pairs * sizeof(int)));
+    cudaErrorCheck(cudaMemcpy(
+        d_pairs, point_pairs.data(), 2 * n_pairs * sizeof(int),
+        cudaMemcpyHostToDevice));
+
+    float* d_out;
+    cudaErrorCheck(cudaMalloc(&d_out, n_pairs * sizeof(float)));
+
+    const int block_size = 256;
+    const int num_blocks = (n_pairs + block_size - 1) / block_size;
+    compute_point_point_distances_kernel<USE_EIGEN><<<num_blocks, block_size>>>(
+        d_Vx, d_Vy, d_Vz, n_points, d_pairs, n_pairs, d_out);
+    cudaErrorCheck(cudaPeekAtLastError());
+    cudaErrorCheck(cudaDeviceSynchronize());
+
+    Eigen::VectorXf out(n_pairs);
+    cudaMemcpy(
+        out.data(), d_out, n_pairs * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_V);
+    cudaFree(d_pairs);
+    cudaFree(d_out);
+
+    return out;
+}
+
+//==============================================================================
+// Line-line example
+//==============================================================================
+
+__host__ __device__ inline float line_line_distance(
     const Eigen::Vector3f& ea0,
     const Eigen::Vector3f& ea1,
     const Eigen::Vector3f& eb0,
@@ -22,192 +128,180 @@ __host__ __device__ float line_line_distance(
 {
     const Eigen::Vector3f normal = (ea1 - ea0).cross(eb1 - eb0);
     const float line_to_line = (eb0 - ea0).dot(normal);
+    assert(normal.squaredNorm() != 0);
     return line_to_line * line_to_line / normal.squaredNorm();
 }
 
-template <typename Vector>
-__global__ void compute_point_point_distances_cuda(
-    const Vector* const p1, const Vector* const p2, float* const out, size_t N)
+__host__ __device__ inline float line_line_distance(
+    const float ea0_x,
+    const float ea0_y,
+    const float ea0_z,
+    const float ea1_x,
+    const float ea1_y,
+    const float ea1_z,
+    const float eb0_x,
+    const float eb0_y,
+    const float eb0_z,
+    const float eb1_x,
+    const float eb1_y,
+    const float eb1_z)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        out[idx] = point_point_distance(p1[idx], p2[idx]);
-    }
-}
-
-template <typename Vector>
-Eigen::VectorXf compute_point_point_distances_gpu_common(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2)
-{
-    Vector *d_p1, *d_p2;
-    float* d_out;
-    assert(p1.rows() == 3 && p2.rows() == 3);
-    assert(p1.cols() == p2.cols());
-    const size_t N = p1.cols();
-
-    cudaMalloc(&d_p1, N * sizeof(Vector));
-    cudaMalloc(&d_p2, N * sizeof(Vector));
-    cudaMalloc(&d_out, N * sizeof(float));
-
-    cudaMemcpy(d_p1, p1.data(), N * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_p2, p2.data(), N * sizeof(Vector), cudaMemcpyHostToDevice);
-
-    compute_point_point_distances_cuda<<<(N + 255) / 256, 256>>>(
-        d_p1, d_p2, d_out, N);
-
-    Eigen::VectorXf out(N);
-    cudaMemcpy(out.data(), d_out, N * sizeof(float), cudaMemcpyDeviceToHost);
-
-    cudaFree(d_p1);
-    cudaFree(d_p2);
-    cudaFree(d_out);
-
-    return out;
-}
-
-Eigen::VectorXf compute_point_point_distances_gpu(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2)
-{
-    return compute_point_point_distances_gpu_common<Eigen::Vector3f>(p1, p2);
-}
-
-template <typename Vector>
-__global__ void compute_line_line_distances_cuda(
-    const Vector* const ea0,
-    const Vector* const ea1,
-    const Vector* const eb0,
-    const Vector* const eb1,
-    float* const out,
-    size_t N)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < N) {
-        out[idx] = line_line_distance(ea0[idx], ea1[idx], eb0[idx], eb1[idx]);
-    }
-}
-
-template <typename Vector>
-Eigen::VectorXf compute_line_line_distances_gpu_common(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1)
-{
-    Vector *d_ea0, *d_ea1, *d_eb0, *d_eb1;
-    float* d_out;
-    assert(ea0.cols() == ea1.cols());
-    assert(ea0.cols() == eb0.cols());
-    assert(ea0.cols() == eb1.cols());
-    const size_t N = ea0.cols();
-
-    cudaMalloc(&d_ea0, N * sizeof(Vector));
-    cudaMalloc(&d_ea1, N * sizeof(Vector));
-    cudaMalloc(&d_eb0, N * sizeof(Vector));
-    cudaMalloc(&d_eb1, N * sizeof(Vector));
-    cudaMalloc(&d_out, N * sizeof(float));
-
-    cudaMemcpy(d_ea0, ea0.data(), N * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_ea1, ea1.data(), N * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_eb0, eb0.data(), N * sizeof(Vector), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_eb1, eb1.data(), N * sizeof(Vector), cudaMemcpyHostToDevice);
-
-    compute_line_line_distances_cuda<<<(N + 255) / 256, 256>>>(
-        d_ea0, d_ea1, d_eb0, d_eb1, d_out, N);
-
-    Eigen::VectorXf out(N);
-    cudaMemcpy(out.data(), d_out, N * sizeof(float), cudaMemcpyDeviceToHost);
-
-    cudaFree(d_ea0);
-    cudaFree(d_ea1);
-    cudaFree(d_eb0);
-    cudaFree(d_eb1);
-    cudaFree(d_out);
-
-    return out;
-}
-
-Eigen::VectorXf compute_line_line_distances_gpu(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1)
-{
-    return compute_line_line_distances_gpu_common<Eigen::Vector3f>(
-        ea0, ea1, eb0, eb1);
-}
-
-// Baseline CUDA implementation
-
-struct Vec3D {
-    float x;
-    float y;
-    float z;
-};
-
-__host__ __device__ float point_point_distance(const Vec3D& p1, const Vec3D& p2)
-{
-    return (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y)
-        + (p1.z - p2.z) * (p1.z - p2.z);
-}
-
-__host__ __device__ float line_line_distance(
-    const Vec3D& ea0, const Vec3D& ea1, const Vec3D& eb0, const Vec3D& eb1)
-{
-    const float t0 = ea0.x - ea1.x;
-    const float t1 = eb0.y - eb1.y;
-    const float t2 = ea0.y - ea1.y;
-    const float t3 = eb0.x - eb1.x;
+    const float t0 = ea0_x - ea1_x;
+    const float t1 = eb0_y - eb1_y;
+    const float t2 = ea0_y - ea1_y;
+    const float t3 = eb0_x - eb1_x;
     const float t4 = t0 * t1 - t2 * t3;
-    const float t5 = eb0.z - eb1.z;
-    const float t6 = ea0.z - ea1.z;
+    const float t5 = eb0_z - eb1_z;
+    const float t6 = ea0_z - ea1_z;
     const float t7 = -t1 * t6 + t2 * t5;
-    const float t8 = t4 * (ea0.z - eb0.z) + t7 * (ea0.x - eb0.x)
-        - (ea0.y - eb0.y) * (t0 * t5 - t3 * t6);
+    const float t8 = t4 * (ea0_z - eb0_z) + t7 * (ea0_x - eb0_x)
+        - (ea0_y - eb0_y) * (t0 * t5 - t3 * t6);
     const float t9 = t4 * t4;
     const float t10 = t7 * t7;
     const float t11 = t0 * t5 - t3 * t6;
     return t8 * t8 / (t9 + t10 + t11 * t11);
 }
 
-Eigen::VectorXf compute_point_point_distances_gpu_no_eigen(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2)
+template <bool USE_EIGEN = true>
+__global__ void compute_line_line_distances_kernel(
+    const float* __restrict__ Vx,
+    const float* __restrict__ Vy,
+    const float* __restrict__ Vz,
+    const size_t __restrict__ n_points,
+    const int* __restrict__ E0,
+    const int* __restrict__ E1,
+    const size_t __restrict__ n_edges,
+    const int* __restrict__ pairs,
+    const size_t __restrict__ n_pairs,
+    float* const out)
 {
-    return compute_point_point_distances_gpu_common<Vec3D>(p1, p2);
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n_pairs; i += stride) {
+        const int ei = pairs[2 * i];
+        const int ej = pairs[2 * i + 1];
+        const int ea0 = E0[ei], ea1 = E1[ei];
+        const int eb0 = E0[ej], eb1 = E1[ej];
+
+        if constexpr (USE_EIGEN) {
+            out[i] = line_line_distance(
+                Eigen::Vector3f(Vx[ea0], Vy[ea0], Vz[ea0]),
+                Eigen::Vector3f(Vx[ea1], Vy[ea1], Vz[ea1]),
+                Eigen::Vector3f(Vx[eb0], Vy[eb0], Vz[eb0]),
+                Eigen::Vector3f(Vx[eb1], Vy[eb1], Vz[eb1]));
+        } else {
+            out[i] = line_line_distance(
+                Vx[ea0], Vy[ea0], Vz[ea0], //
+                Vx[ea1], Vy[ea1], Vz[ea1], //
+                Vx[eb0], Vy[eb0], Vz[eb0], //
+                Vx[eb1], Vy[eb1], Vz[eb1]);
+        }
+    }
 }
 
-Eigen::VectorXf compute_line_line_distances_gpu_no_eigen(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1)
+template <bool USE_EIGEN>
+Eigen::VectorXf compute_line_line_distances_gpu(
+    const Eigen::MatrixXf& V,
+    const Eigen::MatrixXi& E,
+    const std::vector<std::array<int, 2>>& line_pairs)
 {
-    return compute_line_line_distances_gpu_common<Vec3D>(ea0, ea1, eb0, eb1);
+    assert(V.cols() == 3);
+    const size_t n_points = V.rows();
+    const size_t n_edges = E.rows();
+    const size_t n_pairs = line_pairs.size();
+
+    float* d_V;
+    cudaErrorCheck(cudaMalloc(&d_V, V.size() * sizeof(float)));
+    cudaErrorCheck(cudaMemcpy(
+        d_V, V.data(), V.size() * sizeof(float), cudaMemcpyHostToDevice));
+    const float* const d_Vx = d_V;
+    const float* const d_Vy = d_Vx + n_points;
+    const float* const d_Vz = d_Vy + n_points;
+
+    int* d_E;
+    cudaErrorCheck(cudaMalloc(&d_E, E.size() * sizeof(int)));
+    cudaErrorCheck(cudaMemcpy(
+        d_E, E.data(), E.size() * sizeof(int), cudaMemcpyHostToDevice));
+    const int* const d_E0 = d_E;
+    const int* const d_E1 = d_E + n_edges;
+
+    int* d_pairs;
+    cudaErrorCheck(cudaMalloc(&d_pairs, 2 * n_pairs * sizeof(int)));
+    cudaErrorCheck(cudaMemcpy(
+        d_pairs, line_pairs.data(), 2 * n_pairs * sizeof(int),
+        cudaMemcpyHostToDevice));
+
+    float* d_out;
+    cudaErrorCheck(cudaMalloc(&d_out, n_pairs * sizeof(float)));
+
+    const int block_size = 256;
+    const int num_blocks = (n_pairs + block_size - 1) / block_size;
+    compute_line_line_distances_kernel<USE_EIGEN><<<num_blocks, block_size>>>(
+        d_Vx, d_Vy, d_Vz, n_points, d_E0, d_E1, n_edges, d_pairs, n_pairs,
+        d_out);
+    cudaErrorCheck(cudaPeekAtLastError());
+    cudaErrorCheck(cudaDeviceSynchronize());
+
+    Eigen::VectorXf out(n_pairs);
+    cudaMemcpy(
+        out.data(), d_out, n_pairs * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_V);
+    cudaFree(d_E);
+    cudaFree(d_pairs);
+    cudaFree(d_out);
+
+    return out;
 }
 
+//==============================================================================
 // Baseline CPU implementation
+//==============================================================================
 
 Eigen::VectorXf compute_point_point_distances_cpu(
-    const Eigen::MatrixXf& p1, const Eigen::MatrixXf& p2)
+    const Eigen::MatrixXf& V,
+    const std::vector<std::array<int, 2>>& point_pairs)
 {
-    Eigen::VectorXf out(p1.cols());
-    for (int i = 0; i < p1.cols(); i++) {
-        out(i) = point_point_distance(p1.col(i), p2.col(i));
+    Eigen::VectorXf out(point_pairs.size());
+    int pi = 0;
+    for (const auto& [vi, vj] : point_pairs) {
+        out[pi++] = point_point_distance(V.row(vi), V.row(vj));
     }
+    assert(pi == point_pairs.size());
     return out;
 }
 
 Eigen::VectorXf compute_line_line_distances_cpu(
-    const Eigen::MatrixXf& ea0,
-    const Eigen::MatrixXf& ea1,
-    const Eigen::MatrixXf& eb0,
-    const Eigen::MatrixXf& eb1)
+    const Eigen::MatrixXf& V,
+    const Eigen::MatrixXi& E,
+    const std::vector<std::array<int, 2>>& line_pairs)
 {
-    Eigen::VectorXf out(ea0.cols());
-    for (int i = 0; i < ea0.cols(); i++) {
-        out(i) =
-            line_line_distance(ea0.col(i), ea1.col(i), eb0.col(i), eb1.col(i));
+    Eigen::VectorXf out(line_pairs.size());
+    int li = 0;
+    for (const auto& [ei, ej] : line_pairs) {
+        out[li++] = line_line_distance(
+            V.row(E(ei, 0)), V.row(E(ei, 1)), V.row(E(ej, 0)), V.row(E(ej, 1)));
     }
+    assert(li == line_pairs.size());
     return out;
 }
+
+//==============================================================================
+// Template instantiations
+//==============================================================================
+
+template Eigen::VectorXf compute_point_point_distances_gpu<false>(
+    const Eigen::MatrixXf&, const std::vector<std::array<int, 2>>&);
+template Eigen::VectorXf compute_point_point_distances_gpu<true>(
+    const Eigen::MatrixXf&, const std::vector<std::array<int, 2>>&);
+
+template Eigen::VectorXf compute_line_line_distances_gpu<false>(
+    const Eigen::MatrixXf&,
+    const Eigen::MatrixXi&,
+    const std::vector<std::array<int, 2>>&);
+template Eigen::VectorXf compute_line_line_distances_gpu<true>(
+    const Eigen::MatrixXf&,
+    const Eigen::MatrixXi&,
+    const std::vector<std::array<int, 2>>&);
 
 } // namespace ece
