@@ -5,6 +5,8 @@
 
 #include <example.h>
 
+// #include <iostream>
+
 TEST_CASE("Benchmark Point-Point Distances", "[!benchmark]")
 {
     constexpr int N_POINTS = 1'000'000;
@@ -66,4 +68,18 @@ TEST_CASE("Benchmark Line-Line Distances", "[!benchmark]")
         return ece::compute_line_line_distances_gpu</*USE_EIGEN=*/false>(
             V, E, line_pairs);
     };
+}
+
+TEST_CASE("Benchmark Function Pointer", "[!benchmark][lambda]")
+{
+    // std::cout << ece::apply_function_on_gpu(
+    //                  Eigen::VectorXf::LinSpaced(11, 0, 10))
+    //                  .transpose()
+    //           << std::endl;
+
+    constexpr int N = 1'000'000;
+
+    const Eigen::VectorXf x = Eigen::VectorXf::Random(N);
+
+    BENCHMARK("GPU") { return ece::apply_function_on_gpu(x); };
 }

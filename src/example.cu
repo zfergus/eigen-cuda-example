@@ -291,6 +291,53 @@ Eigen::VectorXf compute_line_line_distances_cpu(
 }
 
 //==============================================================================
+// Pass lambda function to kernel
+//==============================================================================
+
+template <class F>
+__global__ void apply_function_kernel(
+    F f,
+    const float* __restrict__ x,
+    const size_t __restrict__ n,
+    float* const out)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < n; i += stride) {
+        out[i] = f(x[i]);
+    }
+}
+
+Eigen::VectorXf apply_function_on_gpu(const Eigen::VectorXf& x)
+{
+    const size_t n = x.size();
+    const size_t n_bytes = n * sizeof(float);
+
+    float* d_x;
+    cudaErrorCheck(cudaMalloc(&d_x, n_bytes));
+    cudaErrorCheck(cudaMemcpy(d_x, x.data(), n_bytes, cudaMemcpyHostToDevice));
+
+    float* d_out;
+    cudaErrorCheck(cudaMalloc(&d_out, n_bytes));
+
+    const int block_size = 256;
+    const int num_blocks = (n + block_size - 1) / block_size;
+    apply_function_kernel<<<num_blocks, block_size>>>(
+        [] __device__(float x) -> float { return x * x; }, d_x, n, d_out);
+    cudaErrorCheck(cudaPeekAtLastError());
+    cudaErrorCheck(cudaDeviceSynchronize());
+
+    Eigen::VectorXf out(n);
+    cudaErrorCheck(
+        cudaMemcpy(out.data(), d_out, n_bytes, cudaMemcpyDeviceToHost));
+
+    cudaErrorCheck(cudaFree(d_x));
+    cudaErrorCheck(cudaFree(d_out));
+
+    return out;
+}
+
+//==============================================================================
 // Template instantiations
 //==============================================================================
 

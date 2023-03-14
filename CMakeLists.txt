@@ -139,6 +139,8 @@ endif()
 find_package(CUDAToolkit)
 target_link_libraries(eigen_cuda_example PRIVATE CUDA::cudart)
 
+target_compile_options(eigen_cuda_example PRIVATE "--extended-lambda")
+
 ################################################################################
 # Tests
 ################################################################################

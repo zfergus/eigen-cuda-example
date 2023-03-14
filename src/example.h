@@ -30,4 +30,8 @@ Eigen::VectorXf compute_line_line_distances_cpu(
     const Eigen::MatrixXi& E,
     const std::vector<std::array<int, 2>>& line_pairs);
 
+// Lambda functions
+
+Eigen::VectorXf apply_function_on_gpu(const Eigen::VectorXf& x);
+
 } // namespace ece
