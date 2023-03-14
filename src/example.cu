@@ -28,8 +28,10 @@ void throw_on_cuda_error(
 // Point-point example
 //==============================================================================
 
-__host__ __device__ inline float
-point_point_distance(const Eigen::Vector3f& p1, const Eigen::Vector3f& p2)
+template <typename DerivedP0, typename DerivedP1>
+__host__ __device__ inline auto point_point_distance(
+    const Eigen::MatrixBase<DerivedP0>& p1,
+    const Eigen::MatrixBase<DerivedP1>& p2)
 {
     return (p1 - p2).squaredNorm();
 }
@@ -42,8 +44,10 @@ __host__ __device__ inline float point_point_distance(
     const float p2_y,
     const float p2_z)
 {
-    return (p1_x - p2_x) * (p1_x - p2_x) + (p1_y - p2_y) * (p1_y - p2_y)
-        + (p1_z - p2_z) * (p1_z - p2_z);
+    const float dx = p1_x - p2_x;
+    const float dy = p1_y - p2_y;
+    const float dz = p1_z - p2_z;
+    return dx * dx + dy * dy + dz * dz;
 }
 
 template <bool USE_EIGEN = true>
